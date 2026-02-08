@@ -12,15 +12,14 @@ import asyncio
 import hashlib
 import requests
 import csv
-from datetime import datetime, timedelta
-from collections import defaultdict
+from datetime import datetime
 from dotenv import load_dotenv
 from bleak import BleakScanner
 
 load_dotenv()
 # Configuration
 SCAN_INTERVAL = 5  # seconds between scans
-BATCH_SEND_INTERVAL = 90  # 90 seconds between sends
+BATCH_SEND_INTERVAL = 180  # seconds between sends
 OUTPUT_FILE = "detections.csv"
 GATEWAY_SECRET = os.getenv("GATEWAY_SECRET")
 if not GATEWAY_SECRET:
@@ -33,7 +32,7 @@ class TrailScanner:
         self.total_detections = 0
         self.setup_csv()
         self.last_batch_time = datetime.now()
-        self.buffer = defaultdict(list)
+        self.buffer = set()  # Track unique device IDs only
 
     def setup_csv(self):
         """Initialize CSV file with headers"""
@@ -46,51 +45,21 @@ class TrailScanner:
         """Hash MAC address for privacy"""
         return hashlib.sha256(mac_address.encode()).hexdigest()[:16]
 
-    def cleanup_buffer(self):
-        """Cleans up anything older than last batch send"""
-        pass
-
     def batch_send(self):
         """Upload readings"""
         if not self.buffer:
             return
 
         start_time = datetime.now()
-        data = []
-
-        for device, readings in self.buffer.items():
-            device_data = {
-                "hashed_id": device,
-                "detection_count": len(readings),
-            }
-            for ts_str, rssi in readings:
-                ts = datetime.fromisoformat(ts_str)
-                if "first_seen" not in device_data:
-                    device_data["first_seen"] = ts_str
-                    device_data["last_seen"] = ts_str
-                    device_data["min_rssi"] = rssi
-                    device_data["max_rssi"] = rssi
-                    continue
-                if ts < datetime.fromisoformat(device_data["first_seen"]):
-                    device_data["first_seen"] = ts_str
-                if ts > datetime.fromisoformat(device_data["last_seen"]):
-                    device_data["last_seen"] = ts_str
-                device_data["min_rssi"] = min(rssi, device_data["min_rssi"])
-                device_data["max_rssi"] = max(rssi, device_data["max_rssi"])
-
-            device_data["rssi_variance"] = (
-                device_data["max_rssi"] - device_data["min_rssi"]
-            )
-            data.append(device_data)
+        unique_devices_count = len(self.buffer)
 
         payload = {
             "gateway_id": "kt_trail_pi_001",
             "timestamp": start_time.isoformat(),
-            "unique_devices": len(data),
-            "device_sessions": data,
+            "unique_devices": unique_devices_count,
         }
 
-        self.buffer = defaultdict(list)
+        self.buffer = set()
         self.last_batch_time = start_time
 
         headers = {
@@ -125,15 +94,15 @@ class TrailScanner:
         return detections
 
     def save_detections(self, detections):
-        """Append detections to CSV and add to buffer"""
+        """Append detections to CSV and add unique devices to buffer"""
         if not detections:
             return
 
+        # Add unique device IDs to buffer (for counting)
         for detection in detections:
-            self.buffer[detection["hashed_mac"]].append(
-                (detection["timestamp"], detection["rssi"])
-            )
+            self.buffer.add(detection["hashed_mac"])
 
+        # Save all detections to CSV for local logging
         with open(OUTPUT_FILE, "a", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=["timestamp", "hashed_mac", "rssi"])
             writer.writerows(detections)
