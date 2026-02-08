@@ -29,13 +29,14 @@ export async function POST(request: Request) {
     const body: piPayload = JSON.parse(bodyText);
     const { gateway_id, timestamp, unique_devices } = body;
     const unixTimeStamp = new Date(timestamp).getTime();
+    
     const p = redis.pipeline();
     
     // Set gateway heartbeat
     p.set(`gateway_id:${gateway_id}:heartbeat`, timestamp);
 
-    // Store count data with timestamp
-    const countKey = `gateway_id:${gateway_id}:counts`;
+    // Store count data with timestamp-based key
+    const countKey = `gateway_id:${gateway_id}:traffic:${unixTimeStamp}`;
     const countValue = JSON.stringify({
       timestamp,
       unique_devices,
