@@ -20,14 +20,24 @@ interface BLESession {
 
 const redis = Redis.fromEnv();
 export async function POST(request: Request) {
+  console.log("POST /api/telemetry - Request received");
   const authHeader = request.headers.get("x-api-key");
 
   if (!authHeader || authHeader !== process.env.GATEWAY_SECRET) {
+    console.log("POST /api/telemetry - Unauthorized");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  console.log("POST /api/telemetry - Authorized, processing...");
+
   try {
-    const body: piPayload = await request.json();
+    // Read body as text to measure size, then parse as JSON
+    const bodyText = await request.text();
+    const bodySizeBytes = new Blob([bodyText]).size;
+    const bodySizeKB = (bodySizeBytes / 1024).toFixed(2);
+    console.log(`POST /api/telemetry - Request body size: ${bodySizeBytes} bytes (${bodySizeKB} KB)`);
+    
+    const body: piPayload = JSON.parse(bodyText);
     const { gateway_id, timestamp, device_sessions } = body;
     const unixTimeStamp = new Date(timestamp).getTime();
     const p = redis.pipeline();
@@ -49,6 +59,7 @@ export async function POST(request: Request) {
     // Execute all pipeline operations at once
     await p.exec();
     
+    console.log(`POST /api/telemetry - Successfully processed ${device_sessions.length} device sessions`);
     return NextResponse.json({ success: true, processed: device_sessions.length });
   } catch (error) {
     console.error("Error saving to redis", error);
