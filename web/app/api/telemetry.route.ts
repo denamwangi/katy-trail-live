@@ -49,11 +49,11 @@ export async function POST(request: Request) {
     // Execute all pipeline operations at once
     await p.exec();
     
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, processed: device_sessions.length });
   } catch (error) {
-    console.log("Error saving to redis", error);
+    console.error("Error saving to redis", error);
     return NextResponse.json(
-      { error: "Failed to upload to redis" },
+      { error: "Failed to upload to redis", details: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 },
     );
   }
