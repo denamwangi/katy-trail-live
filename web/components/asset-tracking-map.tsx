@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import Map, { Marker, Source, Layer } from "react-map-gl";
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
+import Map, { Marker, Source, Layer, MapRef } from "react-map-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,7 @@ export function AssetTrackingMap() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [mapboxToken, setMapboxToken] = useState<string>("");
+  const mapRef = useRef<MapRef>(null);
 
   // Fetch Mapbox token from environment (client-side)
   useEffect(() => {
@@ -49,6 +50,40 @@ export function AssetTrackingMap() {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
     setMapboxToken(token);
   }, []);
+
+  // IMPORTANT: Use useLayoutEffect (not useEffect) for map resizing
+  // useLayoutEffect runs synchronously after DOM mutations but BEFORE browser paint.
+  // This ensures the map container has accurate dimensions before the map renders,
+  // preventing the map from appearing in the top-left corner or with incorrect sizing.
+  // If this is changed to useEffect, the map will likely have sizing issues on initial render.
+  useLayoutEffect(() => {
+    if (mapRef.current) {
+      // Trigger map resize to ensure it fills container
+      const map = mapRef.current.getMap();
+      if (map) {
+        // Small delay to ensure container has rendered
+        requestAnimationFrame(() => {
+          map.resize();
+        });
+      }
+    }
+  });
+
+  // Handle window resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (mapRef.current) {
+        const map = mapRef.current.getMap();
+        if (map) {
+          map.resize();
+        }
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
 
   // Fetch active tags
   const fetchTags = useCallback(async (showLoading = false) => {
@@ -169,22 +204,20 @@ export function AssetTrackingMap() {
           {refreshing ? "Refreshing..." : "Refresh"}
         </Button>
       </div>
-      <div className="h-[600px] border rounded-lg overflow-hidden relative w-full">
-        {tags.length === 0 && !loading && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/50 z-10">
-            <p className="text-muted-foreground">No active tags found</p>
-          </div>
-        )}
-        <Map
-          mapboxAccessToken={mapboxToken}
-          initialViewState={{
-            longitude: centerLng,
-            latitude: centerLat,
-            zoom: tags.length > 0 ? 12 : 10,
-          }}
-          style={{ width: "100%", height: "100%", position: "absolute", top: 0, left: 0 }}
-          mapStyle="mapbox://styles/mapbox/streets-v12"
-        >
+      <div className="relative w-full border rounded-lg overflow-hidden" style={{ height: "600px", position: "relative" }}>
+        <div style={{ width: "100%", height: "100%", position: "absolute", inset: 0 }}>
+          <Map
+            ref={mapRef}
+            mapboxAccessToken={mapboxToken}
+            initialViewState={{
+              longitude: centerLng,
+              latitude: centerLat,
+              zoom: tags.length > 0 ? 12 : 10,
+            }}
+            style={{ width: "100%", height: "100%", display: "block" }}
+            mapStyle="mapbox://styles/mapbox/streets-v12"
+            reuseMaps
+          >
         {/* Render breadcrumb trails */}
         {Object.entries(tagHistories).map(([tagId, history]) => {
           if (!history || history.coordinates.length < 2) return null;
@@ -236,7 +269,15 @@ export function AssetTrackingMap() {
             </div>
           </Marker>
         ))}
-        </Map>
+          </Map>
+        </div>
+        {tags.length === 0 && !loading && (
+          <div className="absolute inset-0 flex items-center justify-center bg-background/30 z-10 pointer-events-none">
+            <div className="bg-background/90 px-4 py-2 rounded-lg border">
+              <p className="text-muted-foreground">No active tags found</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
