@@ -54,3 +54,8 @@ yarn-error.log*
 
 # Gateway output
 gateway/detections.csv
+
+# Test files
+test_gateway.py
+test-api.sh
+plan.md
