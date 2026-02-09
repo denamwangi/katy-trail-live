@@ -49,6 +49,8 @@ export async function appendTagHistory(
   const key = `tag:history:${tagId}`;
   
   // Add entry to stream
+  // Note: Stream trimming will need to be handled separately or via Redis configuration
+  // Upstash Redis client may not support MAXLEN in xadd options
   await redis.xadd(key, "*", {
     lat: state.lat.toString(),
     lng: state.lng.toString(),
@@ -56,15 +58,6 @@ export async function appendTagHistory(
     gateway_id: state.gateway_id,
     ts: state.ts,
   });
-  
-  // Trim stream to max 10000 entries (approximate)
-  // Using XTRIM with MAXLEN ~ 10000
-  try {
-    await redis.xtrim(key, "MAXLEN", "~", 10000);
-  } catch (error) {
-    // XTRIM might not be available in all Redis versions, log but don't fail
-    console.warn(`Failed to trim stream ${key}:`, error);
-  }
 }
 
 /**
@@ -111,7 +104,15 @@ export async function getTagHistoryGeoJSON(
   // Get all entries from the stream
   const entries = await redis.xrange(key, "-", "+");
   
-  if (!entries || entries.length === 0) {
+  // Handle different return types from Upstash Redis
+  if (!entries) {
+    return null;
+  }
+  
+  // Convert to array if it's not already
+  const entriesArray = Array.isArray(entries) ? entries : Object.entries(entries);
+  
+  if (entriesArray.length === 0) {
     return null;
   }
   
@@ -119,7 +120,7 @@ export async function getTagHistoryGeoJSON(
   // Upstash returns entries as array of [id, [field, value, field, value, ...]]
   const coordinates: [number, number][] = [];
   
-  for (const entry of entries) {
+  for (const entry of entriesArray) {
     // Entry format: [id, data] where data is an array of [field, value, field, value, ...]
     const entryData = Array.isArray(entry) ? entry[1] : (entry as any).data || entry;
     

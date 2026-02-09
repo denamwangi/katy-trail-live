@@ -3,10 +3,10 @@ import { getTagHistoryGeoJSON } from "@/lib/redis-tags";
 
 export async function GET(
   request: Request,
-  { params }: { params: { tagId: string } }
+  { params }: { params: Promise<{ tagId: string }> }
 ) {
   try {
-    const { tagId } = params;
+    const { tagId } = await params;
 
     if (!tagId) {
       return NextResponse.json(

@@ -9,6 +9,7 @@ export async function GET() {
     const tags = await Promise.all(
       tagIds.map(async (tagId) => {
         const state = await getTagLiveState(tagId);
+        if (!state) return null;
         return {
           id: tagId,
           ...state,
@@ -16,9 +17,9 @@ export async function GET() {
       })
     );
 
-    // Filter out null states (shouldn't happen, but just in case)
+    // Filter out null states
     const activeTags = tags.filter(
-      (tag) => tag.lat !== undefined && tag.lng !== undefined
+      (tag): tag is NonNullable<typeof tag> => tag !== null && tag.lat !== undefined && tag.lng !== undefined
     );
 
     return NextResponse.json({ tags: activeTags });
