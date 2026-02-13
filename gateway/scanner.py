@@ -45,7 +45,10 @@ class TrailScanner:
         self.buffer = set()  # Track unique device IDs only (for traffic monitoring)
         
         # Asset tracking state
+        # Convert to set for fast lookup, preserving original case for device names
         self.allowed_tag_uuids = set(self.config.get("allowed_tag_uuids", []))
+        # Also create a case-insensitive set for matching
+        self.allowed_tag_uuids_upper = {str(uuid).upper() for uuid in self.allowed_tag_uuids}
         self.tag_rssi_windows = defaultdict(lambda: deque())  # tag_id -> deque of (timestamp, rssi)
         self.last_sent_gps = None  # {lat, lng, ts}
         self.gps_coords = self.config["gps"]
@@ -230,34 +233,51 @@ class TrailScanner:
             if rssi is None:
                 continue
             
-            # Check if this device matches any allowed tag UUID
+            # Check if this device matches any allowed tag UUID or device name from config
             matched_tag_id = None
             
-            # Check service UUIDs (common for BLE tags)
-            device_metadata = device.details.get("props", {})
-            service_uuids = device_metadata.get("UUIDs", [])
+            # First, check device name against allowed_tag_uuids (case-sensitive match)
+            if hasattr(device, "name") and device.name:
+                if device.name in self.allowed_tag_uuids:
+                    matched_tag_id = device.name
+                # Also try case-insensitive match
+                elif not matched_tag_id:
+                    device_name_upper = device.name.upper()
+                    for allowed_id in self.allowed_tag_uuids:
+                        if str(allowed_id).upper() == device_name_upper:
+                            matched_tag_id = allowed_id  # Use the original case from config
+                            break
             
-            # Also check metadata if available
-            if hasattr(device, "metadata") and device.metadata:
-                service_uuids = service_uuids + list(device.metadata.get("uuids", []))
+            # If not matched by name, check service UUIDs (common for BLE tags)
+            if not matched_tag_id:
+                device_metadata = device.details.get("props", {})
+                service_uuids = device_metadata.get("UUIDs", [])
+                
+                # Also check metadata if available
+                if hasattr(device, "metadata") and device.metadata:
+                    service_uuids = service_uuids + list(device.metadata.get("uuids", []))
+                
+                for service_uuid in service_uuids:
+                    service_uuid_str = str(service_uuid).upper()
+                    # Check against both original and uppercase versions
+                    if service_uuid_str in self.allowed_tag_uuids_upper:
+                        # Find the original case version
+                        for allowed_id in self.allowed_tag_uuids:
+                            if str(allowed_id).upper() == service_uuid_str:
+                                matched_tag_id = allowed_id
+                                break
+                        if matched_tag_id:
+                            break
             
-            for service_uuid in service_uuids:
-                service_uuid_str = str(service_uuid).upper()
-                if service_uuid_str in self.allowed_tag_uuids:
-                    matched_tag_id = service_uuid_str
-                    break
-            
-            # If no service UUID match, check if device address/name matches (fallback for placeholder UUIDs)
+            # If no service UUID match, check if device address matches (fallback for placeholder UUIDs)
             if not matched_tag_id:
                 device_identifier = str(device.address).upper()
-                if device_identifier in self.allowed_tag_uuids:
-                    matched_tag_id = device_identifier
-                
-                # Also check device name if available
-                if not matched_tag_id and hasattr(device, "name") and device.name:
-                    device_name = str(device.name).upper()
-                    if device_name in self.allowed_tag_uuids:
-                        matched_tag_id = device_name
+                if device_identifier in self.allowed_tag_uuids_upper:
+                    # Find the original case version
+                    for allowed_id in self.allowed_tag_uuids:
+                        if str(allowed_id).upper() == device_identifier:
+                            matched_tag_id = allowed_id
+                            break
             
             # Track for asset tracking if matched
             if matched_tag_id:
